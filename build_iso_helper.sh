@@ -2,6 +2,7 @@
 # This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs:
 # 1. A Live-only version (main.py)
 # 2. An Installable version (main_installable.py + system tools)
+# Includes VirtIO support for modern virtualization environments.
 
 set -e # Exit on error
 
@@ -30,7 +31,8 @@ build_variant() {
     cp /etc/apk/keys/*.pub rootfs_tmp/etc/apk/keys/ || true
 
     # Define packages based on variant
-    PACKAGES="alpine-base python3 busybox"
+    # Added linux-virt to rootfs packages to ensure drivers/modules are available
+    PACKAGES="alpine-base python3 busybox linux-virt"
     if [ "$INCLUDE_TOOLS" = "true" ]; then
         PACKAGES="$PACKAGES util-linux e2fsprogs grub-bios"
     fi
@@ -59,7 +61,6 @@ build_variant() {
     fi
 
     # 3. Create the INIT script
-    # Fixed the shebang path to #!/bin/sh (which points to busybox)
     cat <<EOF > rootfs_tmp/init
 #!/bin/sh
 
@@ -71,6 +72,10 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
+# Load VirtIO modules if they exist
+# This ensures /dev/vda, /dev/vdb, etc. appear in virtual environments
+modprobe virtio virtio_pci virtio_blk virtio_net 2>/dev/null || true
+
 # Setup basic terminal environment
 export TERM=linux
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
@@ -80,9 +85,10 @@ cd /root
 
 echo "---------------------------------------"
 echo "  Booting $ISO_NAME                   "
+echo "  (VirtIO Support Enabled)             "
 echo "---------------------------------------"
 
-# Give the kernel a second to settle
+# Give the kernel and devtmpfs a second to settle
 sleep 1
 
 # Execute Python kernel
