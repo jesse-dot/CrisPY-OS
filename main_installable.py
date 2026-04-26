@@ -122,17 +122,53 @@ def cmd_clear(args):
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def cmd_install(args):
-    """Executes a REAL installation to a block device (e.g., /dev/sda)."""
+    """Executes a REAL installation to a block device."""
     print("=========================================")
     print("      CrisPY OS BARE-METAL INSTALLER     ")
     print("=========================================")
     
-    if not args:
-        print("Usage: install <target_drive>")
-        print("Example: install /dev/sda (Linux VM) or /dev/vda")
-        return
+    print("\nScanning for available hardware drives...")
+    available_drives = []
+    
+    # Safely try to read the Linux block devices
+    try:
+        if os.path.exists('/sys/block'):
+            for dev in os.listdir('/sys/block'):
+                # Ignore temporary loopback and RAM drives to keep the list clean
+                if not dev.startswith('loop') and not dev.startswith('ram'):
+                    available_drives.append(f"/dev/{dev}")
+                    
+        if available_drives:
+            print("Found the following drives:")
+            for i, drive in enumerate(available_drives):
+                print(f"  [{i + 1}] {drive}")
+        else:
+            print("No physical drives detected (or you are testing on Windows/Mac).")
+            
+    except Exception:
+        print("Could not automatically detect drives.")
 
-    target = args[0]
+    print("\nPlease enter the target drive path.")
+    if available_drives:
+        print("You can type the path (e.g., /dev/sda) OR the number from the list above.")
+        
+    target_input = input("\nTarget Drive: ").strip()
+    
+    if not target_input:
+        print("Installation canceled.")
+        return
+        
+    # Check if the user typed a number from the list
+    if target_input.isdigit() and available_drives:
+        idx = int(target_input) - 1
+        if 0 <= idx < len(available_drives):
+            target = available_drives[idx]
+        else:
+            print("Invalid number selection. Installation canceled.")
+            return
+    else:
+        # Otherwise, assume they typed the direct path (e.g., /dev/sda)
+        target = target_input
     
     # 1. EXTREME Warning and Confirmation
     print(f"\n[!!!] DANGER: THIS WILL ERASE EVERYTHING ON '{target}' [!!!]")
@@ -207,7 +243,7 @@ def cmd_help(args):
     print("  mkdir <dir> - Create a new directory")
     print("  rm <file>   - Delete a file")
     print("  clear       - Clear the screen")
-    print("  install     - Install OS to a drive/folder")
+    print("  install     - Install OS to a drive")
     print("  help        - Show this help message")
     print("  halt        - Shut down the system")
 
