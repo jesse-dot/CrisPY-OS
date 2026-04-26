@@ -6,7 +6,9 @@ set -e # Exit on error
 echo "--- Starting CrisPY OS ISO Build Process ---"
 
 # Define the Alpine version and architecture
-ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpha/v3.19/main"
+# Changed from /alpha/ to /v3.19/ for stability
+ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpine/v3.19/main"
+ALPINE_COMMUNITY="https://dl-cdn.alpinelinux.org/alpine/v3.19/community"
 ARCH=$(uname -m)
 
 # 1. Clean up and setup workspace
@@ -21,16 +23,23 @@ mkdir -p rootfs/etc/apk/keys
 cp /etc/apk/keys/*.pub rootfs/etc/apk/keys/ || echo "Warning: Could not copy keys, attempting download anyway..."
 
 # We use --no-scripts to prevent mkinitfs from trying (and failing) to run inside the rootfs
+# Added community repo to ensure python3 is found
 apk add --initdb \
     --root $(pwd)/rootfs \
     --repository "$ALPINE_REPO" \
+    --repository "$ALPINE_COMMUNITY" \
     --arch "$ARCH" \
     --allow-untrusted \
     --no-scripts \
     alpine-base python3
 
 # 3. Copy CrisPY OS code into the rootfs
-cp main.py rootfs/usr/bin/main.py
+if [ -f "main.py" ]; then
+    cp main.py rootfs/usr/bin/main.py
+else
+    echo "ERROR: main.py not found!"
+    exit 1
+fi
 
 # 4. Create the INIT script
 cat <<EOF > rootfs/init
@@ -54,12 +63,11 @@ chmod +x rootfs/init
 # 5. Pack the rootfs into a compressed cpio archive (initramfs)
 echo "Packing rootfs into initramfs..."
 cd rootfs
-# We need to ensure we don't include the 'staging' or 'rootfs' directory themselves
+# We use 'find . | cpio' to create the archive of the filesystem we just built
 find . | cpio -o -H newc | gzip > ../staging/boot/initramfs-crispy
 cd ..
 
 # 6. Fetch the Kernel
-# Again, use --no-scripts because we only need the vmlinuz file, not the automated initramfs build
 echo "Fetching kernel..."
 mkdir -p /tmp/kernel-fetch
 apk add --initdb \
