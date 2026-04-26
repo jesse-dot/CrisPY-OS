@@ -130,17 +130,41 @@ def cmd_install(args):
     print("\nScanning for available hardware drives...")
     available_drives = []
     
+    # 0. Force-mount special Linux filesystems just in case the boot script forgot!
+    try:
+        os.makedirs('/proc', exist_ok=True)
+        os.makedirs('/sys', exist_ok=True)
+        os.makedirs('/dev', exist_ok=True)
+        subprocess.run(['mount', '-t', 'proc', 'none', '/proc'], stderr=subprocess.DEVNULL)
+        subprocess.run(['mount', '-t', 'sysfs', 'none', '/sys'], stderr=subprocess.DEVNULL)
+        subprocess.run(['mount', '-t', 'devtmpfs', 'none', '/dev'], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
     # Safely try to read the Linux block devices
     try:
-        # Method 1: Read from /sys/block (Best method, if /sys is mounted)
-        if os.path.exists('/sys/block') and len(os.listdir('/sys/block')) > 0:
+        # Method 1: Read from /proc/partitions (Very reliable if /proc is mounted)
+        if os.path.exists('/proc/partitions'):
+            with open('/proc/partitions', 'r') as f:
+                lines = f.readlines()[2:] # Skip the header lines
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        dev_name = parts[3]
+                        if not dev_name.startswith('loop') and not dev_name.startswith('ram') and not dev_name.startswith('sr'):
+                            # Skip partitions (like sda1), keep base drives (like sda, vda, nvme0n1)
+                            if not dev_name[-1].isdigit() or ('nvme' in dev_name and 'p' not in dev_name):
+                                available_drives.append(f"/dev/{dev_name}")
+
+        # Method 2: Read from /sys/block (Fallback)
+        if not available_drives and os.path.exists('/sys/block') and len(os.listdir('/sys/block')) > 0:
             for dev in os.listdir('/sys/block'):
                 # Ignore loopback, RAM drives, and CD-ROMs (sr)
                 if not dev.startswith('loop') and not dev.startswith('ram') and not dev.startswith('sr'):
                     available_drives.append(f"/dev/{dev}")
                     
-        # Method 2: Fallback if /sys is not mounted. Check /dev directly!
-        elif os.path.exists('/dev'):
+        # Method 3: Fallback if /sys is not mounted. Check /dev directly!
+        if not available_drives and os.path.exists('/dev'):
             for dev in os.listdir('/dev'):
                 # Look for common VM/PC drive prefixes and ensure it's a main drive (not a partition like sda1)
                 if (dev.startswith('sd') or dev.startswith('vd') or dev.startswith('hd')) and len(dev) == 3:
@@ -160,7 +184,8 @@ def cmd_install(args):
             print("No physical drives detected.")
             print("\n[!] Troubleshooting Tips:")
             print("1. Did you attach a Virtual Hard Disk to the VM in VirtualBox/VMware?")
-            print("2. If using a custom boot script, did you run: mount -t sysfs none /sys")
+            print("2. In VirtualBox, try changing the Storage Controller from SATA to IDE.")
+            print("3. Your Buildroot Linux Kernel might be missing the VirtIO/SATA driver for your VM.")
             
     except Exception as e:
         print(f"Could not automatically detect drives: {e}")
