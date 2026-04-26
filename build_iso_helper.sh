@@ -1,6 +1,6 @@
 #!/bin/sh
 # This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs.
-# Fixed: Syslinux path detection and variable expansion.
+# Enhanced: Added Serial ATA (SATA) and Parallel ATA (PATA/IDE) support via libata.
 
 set -e # Exit on error
 
@@ -68,7 +68,19 @@ echo /sbin/mdev > /proc/sys/kernel/hotplug
 mdev -s
 
 # Load modules
-modprobe virtio_pci virtio_blk nvme ahci sd_mod ata_piix 2>/dev/null || true
+echo "Loading storage drivers (SATA/PATA/VirtIO/NVMe)..."
+# ATA Infrastructure
+modprobe libata 2>/dev/null || true
+# SATA/AHCI
+modprobe ahci libahci 2>/dev/null || true
+# PATA/IDE (Standard Intel/Generic)
+modprobe ata_piix ata_generic pata_acpi 2>/dev/null || true
+# SCSI/Disk Support
+modprobe sd_mod 2>/dev/null || true
+# Virtualization/Modern
+modprobe virtio_pci virtio_blk nvme 2>/dev/null || true
+
+# Re-scan device nodes after driver loading
 mdev -s
 
 export TERM=linux
@@ -99,19 +111,18 @@ EOF
     cp kernel_tmp/boot/vmlinuz-virt "$VARIANT_DIR/staging/boot/vmlinuz"
     
     # Locate syslinux files dynamically
-    SYSLINUX_SRC=$(find kernel_tmp/usr -name "isolinux.bin" | xargs dirname | head -n 1)
+    SYSLINUX_SRC=\$(find kernel_tmp/usr -name "isolinux.bin" | xargs dirname | head -n 1)
     
-    if [ -z "$SYSLINUX_SRC" ]; then
+    if [ -z "\$SYSLINUX_SRC" ]; then
         echo "ERROR: Could not find isolinux.bin in kernel_tmp"
         exit 1
     fi
     
-    echo "Found Syslinux files at: $SYSLINUX_SRC"
-    cp "$SYSLINUX_SRC/isolinux.bin" "$VARIANT_DIR/staging/boot/isolinux/"
-    cp "$SYSLINUX_SRC/ldlinux.c32" "$VARIANT_DIR/staging/boot/isolinux/"
-    # Try to copy optional but helpful modules
-    cp "$SYSLINUX_SRC/libutil.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
-    cp "$SYSLINUX_SRC/libcom32.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
+    echo "Found Syslinux files at: \$SYSLINUX_SRC"
+    cp "\$SYSLINUX_SRC/isolinux.bin" "$VARIANT_DIR/staging/boot/isolinux/"
+    cp "\$SYSLINUX_SRC/ldlinux.c32" "$VARIANT_DIR/staging/boot/isolinux/"
+    cp "\$SYSLINUX_SRC/libutil.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
+    cp "\$SYSLINUX_SRC/libcom32.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
 
     cat <<EOF > "$VARIANT_DIR/staging/boot/isolinux/isolinux.cfg"
 DEFAULT crispy
