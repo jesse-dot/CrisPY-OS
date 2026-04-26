@@ -1,4 +1,4 @@
-name: Build CrisPY OS ISO
+name: Build and Release CrisPY OS
 on: 
   push:
     branches: [ main ]
@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to create releases
     container:
       image: alpine:latest
       options: --privileged
@@ -21,34 +23,38 @@ jobs:
             mtools \
             dosfstools \
             grub-efi \
-            python3
+            python3 \
+            cpio \
+            gzip
 
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Prepare Filesystem
-        run: |
-          mkdir -p iso_root/etc
-          mkdir -p iso_root/usr/bin/crispy
-          
-          # Copy your OS code
-          cp main.py iso_root/usr/bin/crispy/
-          
-          # Force the login shell to be our Python script
-          cat <<EOF > iso_root/etc/profile
-          echo "Booting CrisPY OS..."
-          python3 /usr/bin/crispy/main.py
-          poweroff
-          EOF
-
       - name: Generate ISO
         run: |
-          # Ensure the helper script is executable
           chmod +x ./build_iso_helper.sh
           ./build_iso_helper.sh
 
-      - name: Upload ISO
+      - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
         with:
           name: crispy-os-iso
           path: pyos.iso
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pyos.iso
+          tag_name: v0.1.${{ github.run_number }}
+          name: CrisPY OS Build v0.1.${{ github.run_number }}
+          body: |
+            Automated build of CrisPY OS.
+            
+            Changes in this version:
+            - Latest kernel and Python rootfs structure.
+            - Bootable ISO compatible with BIOS.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
