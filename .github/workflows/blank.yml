@@ -1,4 +1,4 @@
-name: Build and Release CrisPY OS
+name: Build and Release CrisPY OS Variants
 on: 
   push:
     branches: [ main ]
@@ -30,30 +30,32 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Generate ISO
+      - name: Generate ISOs
         run: |
           chmod +x ./build_iso_helper.sh
           ./build_iso_helper.sh
 
-      - name: Upload ISO Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: crispy-os-iso
-          path: pyos.iso
+          name: crispy-os-variants
+          path: "*.iso"
 
       - name: Create GitHub Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          files: pyos.iso
+          files: |
+            crispy-live.iso
+            crispy-installer.iso
           tag_name: v0.1.${{ github.run_number }}
           name: CrisPY OS Build v0.1.${{ github.run_number }}
           body: |
-            Automated build of CrisPY OS.
+            Automated build of CrisPY OS variants.
             
-            Changes in this version:
-            - Latest kernel and Python rootfs structure.
-            - Bootable ISO compatible with BIOS.
+            **Included Variants:**
+            - **Live Version**: Standard shell environment (`main.py`).
+            - **Installer Version**: Includes `fdisk`, `e2fsprogs`, and `grub` for disk installation (`main_installable.py`).
           draft: false
           prerelease: false
         env:
