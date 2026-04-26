@@ -44,15 +44,23 @@ build_variant() {
         --no-scripts \
         $PACKAGES
 
-    # 2. Copy the specific Python script
+    # 2. Copy and CLEAN the specific Python script
+    # This removes hidden non-breaking spaces (\xa0) that cause SyntaxErrors
     if [ -f "$SCRIPT_NAME" ]; then
-        cp "$SCRIPT_NAME" rootfs_tmp/usr/bin/kernel.py
+        echo "Cleaning and copying $SCRIPT_NAME..."
+        sed 's/\xc2\xa0/ /g' "$SCRIPT_NAME" > rootfs_tmp/usr/bin/kernel.py
     else
         echo "Warning: $SCRIPT_NAME not found, falling back to main.py"
-        cp main.py rootfs_tmp/usr/bin/kernel.py
+        if [ -f "main.py" ]; then
+            sed 's/\xc2\xa0/ /g' main.py > rootfs_tmp/usr/bin/kernel.py
+        else
+            echo "ERROR: Neither $SCRIPT_NAME nor main.py found!"
+            exit 1
+        fi
     fi
 
     # 3. Create the INIT script
+    # We ensure we have a functional shell and mount system paths
     cat <<EOF > rootfs_tmp/init
 #!/bin/bin/busybox sh
 /bin/busybox --install -s
@@ -60,10 +68,21 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
+# Setup basic terminal environment
+export TERM=linux
+export HOME=/root
+mkdir -p /root
+cd /root
+
 echo "---------------------------------------"
 echo "  Booting $ISO_NAME                   "
 echo "---------------------------------------"
+
+# Explicitly call python3 to execute our kernel
 python3 /usr/bin/kernel.py
+
+# If the script crashes or exits
+echo "System Halted. Powering off..."
 poweroff -f
 EOF
     chmod +x rootfs_tmp/init
@@ -82,7 +101,6 @@ EOF
     cp kernel_tmp/usr/share/syslinux/isolinux.bin "$VARIANT_DIR/staging/boot/isolinux/"
     cp kernel_tmp/usr/share/syslinux/ldlinux.c32 "$VARIANT_DIR/staging/boot/isolinux/"
 
-    # FIXED: Added missing closing quote to the heredoc path
     cat <<EOF > "$VARIANT_DIR/staging/boot/isolinux/isolinux.cfg"
 DEFAULT crispy
 LABEL crispy
