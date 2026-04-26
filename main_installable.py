@@ -245,8 +245,16 @@ def cmd_install(args):
         
         # 5. Copy the Live File System
         print("-> Copying core system files (this may take a moment)...")
-        # cp -ax copies the root file system but ignores virtual hardware folders like /proc and /dev
-        subprocess.run(['cp', '-ax', '/', '/mnt'], check=True)
+        # BusyBox 'cp' doesn't support '-x', so we manually skip virtual hardware folders
+        skip_folders = ['dev', 'proc', 'sys', 'mnt', 'run', 'tmp']
+        for item in os.listdir('/'):
+            if item not in skip_folders:
+                src = os.path.join('/', item)
+                subprocess.run(['cp', '-a', src, '/mnt/'], check=True)
+        
+        # Create empty mount points for the virtual filesystems on the new drive
+        for folder in skip_folders:
+            os.makedirs(f'/mnt/{folder}', exist_ok=True)
         
         # 6. Install Bootloader
         print("-> Installing GRUB bootloader...")
