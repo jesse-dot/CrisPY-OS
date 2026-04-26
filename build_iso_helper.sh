@@ -12,7 +12,7 @@ ARCH=$(uname -m)
 
 # 1. Clean up and setup workspace
 rm -rf staging rootfs
-mkdir -p staging/boot/grub
+mkdir -p staging/boot/isolinux
 mkdir -p rootfs/bin rootfs/etc rootfs/lib rootfs/proc rootfs/sys rootfs/dev rootfs/tmp rootfs/usr/bin
 
 # 2. Fetch the Alpine Linux base and Python to create a ROOTFS
@@ -61,8 +61,8 @@ cd rootfs
 find . | cpio -o -H newc | gzip > ../staging/boot/initramfs-crispy
 cd ..
 
-# 6. Fetch Kernel and Bootloader files
-echo "Fetching kernel and bootloader components..."
+# 6. Fetch Kernel and ISOLINUX bootloader files
+echo "Fetching kernel and syslinux components..."
 mkdir -p /tmp/kernel-fetch
 apk add --initdb \
     --root /tmp/kernel-fetch \
@@ -70,34 +70,35 @@ apk add --initdb \
     --arch "$ARCH" \
     --allow-untrusted \
     --no-scripts \
-    linux-virt grub-bios
+    linux-virt syslinux
 
-cp /tmp/kernel-fetch/boot/vmlinuz-virt staging/boot/
+# Copy Kernel
+cp /tmp/kernel-fetch/boot/vmlinuz-virt staging/boot/vmlinuz
 
-# 7. Create GRUB configuration
-cat <<EOF > staging/boot/grub/grub.cfg
-set default=0
-set timeout=1
-set gfxpayload=text
+# Copy ISOLINUX components for BIOS booting
+cp /tmp/kernel-fetch/usr/share/syslinux/isolinux.bin staging/boot/isolinux/
+cp /tmp/kernel-fetch/usr/share/syslinux/ldlinux.c32 staging/boot/isolinux/
 
-menuentry "CrisPY OS v0.1" {
-    linux /boot/vmlinuz-virt quiet panic=1
-    initrd /boot/initramfs-crispy
-}
+# 7. Create ISOLINUX configuration (Replaces GRUB for better compatibility)
+cat <<EOF > staging/boot/isolinux/isolinux.cfg
+DEFAULT crispy
+LABEL crispy
+  SAY Booting CrisPY OS...
+  KERNEL /boot/vmlinuz
+  APPEND initrd=/boot/initramfs-crispy quiet panic=1
 EOF
 
-# 8. Build the ISO with explicit Boot Flags for BIOS compatibility
-# We use -as mkisofs with specific El Torito flags which VMware requires
-echo "Creating ISO image with El Torito boot records..."
+# 8. Build the ISO with compatible El Torito flags
+# Removed -isolevel and used -b with the isolinux binary
+echo "Creating ISO image with ISOLINUX..."
 xorriso -as mkisofs \
-  -R -J \
-  -V "CRISPY_OS" \
   -o pyos.iso \
-  -b boot/grub/grub.cfg \
+  -b boot/isolinux/isolinux.bin \
+  -c boot/isolinux/boot.cat \
   -no-emul-boot \
   -boot-load-size 4 \
   -boot-info-table \
-  -isolevel 3 \
+  -R -J -V "CRISPY_OS" \
   staging/
 
 echo "--- Build Complete: pyos.iso is ready ---"
