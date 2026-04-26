@@ -272,6 +272,31 @@ def cmd_install(args):
         print("-> Installing GRUB bootloader...")
         subprocess.run(['grub-install', '--boot-directory=/mnt/boot', target], capture_output=True, check=True)
         
+        # 7. Generate GRUB Configuration
+        print("-> Creating GRUB configuration file...")
+        os.makedirs('/mnt/boot/grub', exist_ok=True)
+        
+        # Auto-detect the kernel name (usually bzImage or vmlinuz)
+        kernel_name = "bzImage" # Default guess
+        if os.path.exists('/mnt/boot'):
+            for f in os.listdir('/mnt/boot'):
+                if 'bzImage' in f or 'vmlinuz' in f:
+                    kernel_name = f
+                    break
+        
+        # Use Python's sys module to find the exact path to the interpreter
+        python_path = sys.executable or "/usr/bin/python3"
+        
+        grub_cfg = f"""set timeout=5
+set default=0
+
+menuentry "CrisPY OS" {{
+    linux /boot/{kernel_name} root={part_dev} rw rootwait init={python_path} /os_main.py
+}}
+
+        with open('/mnt/boot/grub/grub.cfg', 'w') as f:
+            f.write(grub_cfg)
+        
         print("\n=========================================")
         print("       INSTALLATION COMPLETE!            ")
         print("=========================================")
