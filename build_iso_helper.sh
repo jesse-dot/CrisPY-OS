@@ -1,5 +1,6 @@
 #!/bin/sh
 # This script bundles the Alpine kernel and CrisPY OS into a bootable ISO
+# Updated to include fdisk, e2fsprogs, and grub for installation support.
 
 set -e # Exit on error
 
@@ -15,12 +16,12 @@ rm -rf staging rootfs
 mkdir -p staging/boot/isolinux
 mkdir -p rootfs/bin rootfs/etc rootfs/lib rootfs/proc rootfs/sys rootfs/dev rootfs/tmp rootfs/usr/bin
 
-# 2. Fetch the Alpine Linux base, Python, and Busybox to create a ROOTFS
+# 2. Fetch the Alpine Linux base, Python, Busybox, and Installation Tools
 echo "Downloading Alpine components for rootfs..."
 mkdir -p rootfs/etc/apk/keys
 cp /etc/apk/keys/*.pub rootfs/etc/apk/keys/ || echo "Warning: Using host keys"
 
-# Added busybox specifically to fix 'mount' and 'clear' not found errors
+# Added: util-linux (fdisk), e2fsprogs (mkfs.ext4), grub-bios (installation)
 apk add --initdb \
     --root $(pwd)/rootfs \
     --repository "$ALPINE_REPO" \
@@ -28,7 +29,12 @@ apk add --initdb \
     --arch "$ARCH" \
     --allow-untrusted \
     --no-scripts \
-    alpine-base python3 busybox
+    alpine-base \
+    python3 \
+    busybox \
+    util-linux \
+    e2fsprogs \
+    grub-bios
 
 # 3. Copy CrisPY OS code into the rootfs
 if [ -f "main.py" ]; then
@@ -39,11 +45,10 @@ else
 fi
 
 # 4. Create the INIT script
-# We use /bin/busybox sh to ensure we have a functional shell for init
 cat <<EOF > rootfs/init
 #!/bin/bin/busybox sh
 
-# Setup busybox symlinks (this fixes 'mount', 'clear', 'ls', etc.)
+# Setup busybox symlinks
 /bin/busybox --install -s
 
 # Mount essential filesystems
@@ -53,6 +58,7 @@ mount -t devtmpfs none /dev
 
 echo "---------------------------------------"
 echo "  Welcome to CrisPY OS Bootloader...   "
+echo "  (Installer Tools Loaded)             "
 echo "---------------------------------------"
 
 # Run the Python OS
