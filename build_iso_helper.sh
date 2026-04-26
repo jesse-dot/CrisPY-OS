@@ -1,6 +1,6 @@
 #!/bin/sh
 # This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs.
-# Enhanced: Added Serial ATA (SATA) and Parallel ATA (PATA/IDE) support via libata.
+# Fixed: Subshell syntax error and command escaping.
 
 set -e # Exit on error
 
@@ -31,7 +31,7 @@ build_variant() {
     fi
 
     apk add --initdb \
-        --root $(pwd)/rootfs_tmp \
+        --root "$(pwd)/rootfs_tmp" \
         --repository "$ALPINE_REPO" \
         --repository "$ALPINE_COMMUNITY" \
         --arch "$ARCH" \
@@ -69,25 +69,18 @@ mdev -s
 
 # Load modules
 echo "Loading storage drivers (SATA/PATA/VirtIO/NVMe)..."
-# ATA Infrastructure
 modprobe libata 2>/dev/null || true
-# SATA/AHCI
 modprobe ahci libahci 2>/dev/null || true
-# PATA/IDE (Standard Intel/Generic)
 modprobe ata_piix ata_generic pata_acpi 2>/dev/null || true
-# SCSI/Disk Support
 modprobe sd_mod 2>/dev/null || true
-# Virtualization/Modern
 modprobe virtio_pci virtio_blk nvme 2>/dev/null || true
 
-# Re-scan device nodes after driver loading
 mdev -s
 
 export TERM=linux
 export HOME=/root
 cd /root
 
-# Run Python OS
 if [ -f /usr/bin/python3 ]; then
     /usr/bin/python3 /usr/bin/kernel.py
 else
@@ -101,28 +94,32 @@ EOF
 
     # 5. Pack Initramfs
     echo "Packing Initramfs..."
-    (cd rootfs_tmp && find . | cpio -o -H newc | gzip) > "$VARIANT_DIR/staging/boot/initrd"
+    # Changed from subshell to explicit cd to avoid syntax error on some shells
+    CUR_DIR=$(pwd)
+    cd rootfs_tmp
+    find . | cpio -o -H newc | gzip > "$CUR_DIR/$VARIANT_DIR/staging/boot/initrd"
+    cd "$CUR_DIR"
 
     # 6. Setup Bootloader and Kernel
     echo "Fetching Kernel and Syslinux..."
     mkdir -p kernel_tmp
-    apk add --initdb --root $(pwd)/kernel_tmp --repository "$ALPINE_REPO" --arch "$ARCH" --allow-untrusted --no-scripts linux-virt syslinux
+    apk add --initdb --root "$(pwd)/kernel_tmp" --repository "$ALPINE_REPO" --arch "$ARCH" --allow-untrusted --no-scripts linux-virt syslinux
     
     cp kernel_tmp/boot/vmlinuz-virt "$VARIANT_DIR/staging/boot/vmlinuz"
     
-    # Locate syslinux files dynamically
-    SYSLINUX_SRC=\$(find kernel_tmp/usr -name "isolinux.bin" | xargs dirname | head -n 1)
+    # Corrected dynamic syslinux path lookup
+    SYSLINUX_SRC=$(find kernel_tmp/usr -name "isolinux.bin" | xargs dirname | head -n 1)
     
-    if [ -z "\$SYSLINUX_SRC" ]; then
+    if [ -z "$SYSLINUX_SRC" ]; then
         echo "ERROR: Could not find isolinux.bin in kernel_tmp"
         exit 1
     fi
     
-    echo "Found Syslinux files at: \$SYSLINUX_SRC"
-    cp "\$SYSLINUX_SRC/isolinux.bin" "$VARIANT_DIR/staging/boot/isolinux/"
-    cp "\$SYSLINUX_SRC/ldlinux.c32" "$VARIANT_DIR/staging/boot/isolinux/"
-    cp "\$SYSLINUX_SRC/libutil.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
-    cp "\$SYSLINUX_SRC/libcom32.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
+    echo "Found Syslinux files at: $SYSLINUX_SRC"
+    cp "$SYSLINUX_SRC/isolinux.bin" "$VARIANT_DIR/staging/boot/isolinux/"
+    cp "$SYSLINUX_SRC/ldlinux.c32" "$VARIANT_DIR/staging/boot/isolinux/"
+    cp "$SYSLINUX_SRC/libutil.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
+    cp "$SYSLINUX_SRC/libcom32.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
 
     cat <<EOF > "$VARIANT_DIR/staging/boot/isolinux/isolinux.cfg"
 DEFAULT crispy
@@ -140,7 +137,6 @@ EOF
       -R -J -V "CRISPY_OS" \
       "$VARIANT_DIR/staging/"
 
-    # Make the ISO hybrid
     if command -v isohybrid >/dev/null; then
         isohybrid "$ISO_NAME.iso"
     fi
