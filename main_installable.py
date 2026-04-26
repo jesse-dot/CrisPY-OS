@@ -132,21 +132,38 @@ def cmd_install(args):
     
     # Safely try to read the Linux block devices
     try:
-        if os.path.exists('/sys/block'):
+        # Method 1: Read from /sys/block (Best method, if /sys is mounted)
+        if os.path.exists('/sys/block') and len(os.listdir('/sys/block')) > 0:
             for dev in os.listdir('/sys/block'):
-                # Ignore temporary loopback and RAM drives to keep the list clean
-                if not dev.startswith('loop') and not dev.startswith('ram'):
+                # Ignore loopback, RAM drives, and CD-ROMs (sr)
+                if not dev.startswith('loop') and not dev.startswith('ram') and not dev.startswith('sr'):
                     available_drives.append(f"/dev/{dev}")
                     
+        # Method 2: Fallback if /sys is not mounted. Check /dev directly!
+        elif os.path.exists('/dev'):
+            for dev in os.listdir('/dev'):
+                # Look for common VM/PC drive prefixes and ensure it's a main drive (not a partition like sda1)
+                if (dev.startswith('sd') or dev.startswith('vd') or dev.startswith('hd')) and len(dev) == 3:
+                    available_drives.append(f"/dev/{dev}")
+                elif dev.startswith('nvme') and 'n' in dev and 'p' not in dev:
+                    available_drives.append(f"/dev/{dev}")
+                    
+        # Remove duplicates and sort nicely
+        available_drives = list(set(available_drives))
+        available_drives.sort()
+        
         if available_drives:
             print("Found the following drives:")
             for i, drive in enumerate(available_drives):
                 print(f"  [{i + 1}] {drive}")
         else:
-            print("No physical drives detected (or you are testing on Windows/Mac).")
+            print("No physical drives detected.")
+            print("\n[!] Troubleshooting Tips:")
+            print("1. Did you attach a Virtual Hard Disk to the VM in VirtualBox/VMware?")
+            print("2. If using a custom boot script, did you run: mount -t sysfs none /sys")
             
-    except Exception:
-        print("Could not automatically detect drives.")
+    except Exception as e:
+        print(f"Could not automatically detect drives: {e}")
 
     print("\nPlease enter the target drive path.")
     if available_drives:
