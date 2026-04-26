@@ -2,7 +2,7 @@
 # This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs:
 # 1. A Live-only version (main.py)
 # 2. An Installable version (main_installable.py + system tools)
-# Includes VirtIO, SCSI, and NVMe support for broad virtualization/hardware compatibility.
+# Includes VirtIO, SCSI, and NVMe support with mdev for device node population.
 
 set -e # Exit on error
 
@@ -27,7 +27,7 @@ build_variant() {
     mkdir -p rootfs_tmp/etc/apk/keys
     cp /etc/apk/keys/*.pub rootfs_tmp/etc/apk/keys/ || true
 
-    # Core packages including kmod for modprobe
+    # Core packages. Added 'blkid' and 'lsblk' (part of util-linux) for disk discovery
     PACKAGES="alpine-base python3 busybox kmod linux-virt"
     if [ "$INCLUDE_TOOLS" = "true" ]; then
         PACKAGES="$PACKAGES util-linux e2fsprogs grub-bios"
@@ -42,13 +42,10 @@ build_variant() {
         --no-scripts \
         $PACKAGES
 
-    # 2. Extract Kernel Modules to RootFS (Crucial for drive detection)
-    echo "Extracting kernel modules into RootFS..."
-    # We use the modules from the linux-virt package already in the rootfs
-    # but we need to make sure depmod is run for the correct kernel version
+    # 2. Kernel Module Setup
     KVER=$(ls rootfs_tmp/lib/modules | head -n 1)
     echo "Detected kernel version: $KVER"
-    # Ensure modprobe works inside the live environment
+    # Generate module dependency index
     chroot rootfs_tmp /sbin/depmod -a "$KVER" || true
 
     # 3. Copy and CLEAN the specific Python script
@@ -56,7 +53,7 @@ build_variant() {
         echo "Cleaning and copying $SCRIPT_NAME..."
         sed 's/\xc2\xa0/ /g' "$SCRIPT_NAME" > rootfs_tmp/usr/bin/kernel.py
     else
-        echo "Warning: $SCRIPT_NAME not found, falling back to main.py"
+        echo "Warning: $SCRIPT_NAME not found, using main.py"
         sed 's/\xc2\xa0/ /g' main.py > rootfs_tmp/usr/bin/kernel.py
     fi
 
@@ -73,13 +70,25 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 # Mount essential filesystems
 mount -t proc none /proc
 mount -t sysfs none /sys
-mount -t devtmpfs none /dev
+mount -t devtmpfs dev /dev
+
+# Initialize mdev (This is what actually creates the /dev/sda and /dev/vda files)
+echo "Starting device manager (mdev)..."
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+mdev -s
 
 # Load Storage Drivers
-echo "Loading storage drivers..."
-modprobe virtio virtio_pci virtio_blk 2>/dev/null || true
+echo "Loading storage modules..."
+# Common Virtualization storage drivers
+modprobe virtio_pci virtio_blk 2>/dev/null || true
 modprobe nvme 2>/dev/null || true
-modprobe sd_mod ahci 2>/dev/null || true
+modprobe ahci libahci 2>/dev/null || true
+modprobe sd_mod 2>/dev/null || true
+modprobe ata_piix 2>/dev/null || true
+modprobe mptspi mptsas 2>/dev/null || true
+
+# Re-run mdev after loading modules to catch new drives
+mdev -s
 
 # Setup environment
 export TERM=linux
@@ -88,9 +97,10 @@ cd /root
 
 echo "---------------------------------------"
 echo "  Booting $ISO_NAME                   "
+echo "  Hardware scan complete.              "
 echo "---------------------------------------"
 
-# Give the kernel time to scan PCI/Storage
+# Give the hardware a moment to settle
 sleep 2
 
 # Execute Python kernel
@@ -143,4 +153,4 @@ EOF
 build_variant "crispy-live" "main.py" "false"
 build_variant "crispy-installer" "main_installable.py" "true"
 
-echo "Build Process Complete. Two ISOs generated."
+echo "Build Process Complete."
