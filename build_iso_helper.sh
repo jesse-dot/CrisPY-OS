@@ -6,7 +6,6 @@ set -e # Exit on error
 echo "--- Starting CrisPY OS ISO Build Process ---"
 
 # Define the Alpine version and architecture
-# Changed from /alpha/ to /v3.19/ for stability
 ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpine/v3.19/main"
 ALPINE_COMMUNITY="https://dl-cdn.alpinelinux.org/alpine/v3.19/community"
 ARCH=$(uname -m)
@@ -19,11 +18,8 @@ mkdir -p rootfs/bin rootfs/etc rootfs/lib rootfs/proc rootfs/sys rootfs/dev root
 # 2. Fetch the Alpine Linux base and Python to create a ROOTFS
 echo "Downloading Alpine components for rootfs..."
 mkdir -p rootfs/etc/apk/keys
-# Copy keys individually to avoid globbing errors
-cp /etc/apk/keys/*.pub rootfs/etc/apk/keys/ || echo "Warning: Could not copy keys, attempting download anyway..."
+cp /etc/apk/keys/*.pub rootfs/etc/apk/keys/ || echo "Warning: Using host keys"
 
-# We use --no-scripts to prevent mkinitfs from trying (and failing) to run inside the rootfs
-# Added community repo to ensure python3 is found
 apk add --initdb \
     --root $(pwd)/rootfs \
     --repository "$ALPINE_REPO" \
@@ -44,16 +40,15 @@ fi
 # 4. Create the INIT script
 cat <<EOF > rootfs/init
 #!/bin/sh
-# Mount essential filesystems
 mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
-echo "Welcome to CrisPY OS Bootloader..."
-# Run the Python OS
+echo "---------------------------------------"
+echo "  Welcome to CrisPY OS Bootloader...   "
+echo "---------------------------------------"
 python3 /usr/bin/main.py
 
-# If the OS exits, poweroff
 echo "CrisPY OS has exited. Shutting down..."
 poweroff -f
 EOF
@@ -63,12 +58,11 @@ chmod +x rootfs/init
 # 5. Pack the rootfs into a compressed cpio archive (initramfs)
 echo "Packing rootfs into initramfs..."
 cd rootfs
-# We use 'find . | cpio' to create the archive of the filesystem we just built
 find . | cpio -o -H newc | gzip > ../staging/boot/initramfs-crispy
 cd ..
 
-# 6. Fetch the Kernel
-echo "Fetching kernel..."
+# 6. Fetch Kernel and Bootloader files
+echo "Fetching kernel and bootloader components..."
 mkdir -p /tmp/kernel-fetch
 apk add --initdb \
     --root /tmp/kernel-fetch \
@@ -76,7 +70,7 @@ apk add --initdb \
     --arch "$ARCH" \
     --allow-untrusted \
     --no-scripts \
-    linux-virt
+    linux-virt grub-bios
 
 cp /tmp/kernel-fetch/boot/vmlinuz-virt staging/boot/
 
@@ -84,6 +78,7 @@ cp /tmp/kernel-fetch/boot/vmlinuz-virt staging/boot/
 cat <<EOF > staging/boot/grub/grub.cfg
 set default=0
 set timeout=1
+set gfxpayload=text
 
 menuentry "CrisPY OS v0.1" {
     linux /boot/vmlinuz-virt quiet panic=1
@@ -91,14 +86,18 @@ menuentry "CrisPY OS v0.1" {
 }
 EOF
 
-# 8. Build the ISO
-echo "Creating ISO image..."
+# 8. Build the ISO with explicit Boot Flags for BIOS compatibility
+# We use -as mkisofs with specific El Torito flags which VMware requires
+echo "Creating ISO image with El Torito boot records..."
 xorriso -as mkisofs \
-  -joliet -rock \
-  -volid "CRISPY_OS" \
+  -R -J \
+  -V "CRISPY_OS" \
   -o pyos.iso \
   -b boot/grub/grub.cfg \
-  -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -isolevel 3 \
   staging/
 
 echo "--- Build Complete: pyos.iso is ready ---"
