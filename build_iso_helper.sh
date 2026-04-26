@@ -1,8 +1,6 @@
 #!/bin/sh
-# This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs:
-# 1. A Live-only version (main.py)
-# 2. An Installable version (main_installable.py + system tools)
-# Includes VirtIO, SCSI, and NVMe support with isohybrid for better compatibility.
+# This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs.
+# Fixed: Syslinux path detection and variable expansion.
 
 set -e # Exit on error
 
@@ -100,12 +98,20 @@ EOF
     
     cp kernel_tmp/boot/vmlinuz-virt "$VARIANT_DIR/staging/boot/vmlinuz"
     
-    # Try multiple common paths for syslinux files
-    SYSLINUX_DIR="kernel_tmp/usr/share/syslinux"
-    cp "\$SYSLINUX_DIR/isolinux.bin" "$VARIANT_DIR/staging/boot/isolinux/"
-    cp "\$SYSLINUX_DIR/ldlinux.c32" "$VARIANT_DIR/staging/boot/isolinux/"
-    # Required for some BIOSes
-    cp "\$SYSLINUX_DIR/libutil.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
+    # Locate syslinux files dynamically
+    SYSLINUX_SRC=$(find kernel_tmp/usr -name "isolinux.bin" | xargs dirname | head -n 1)
+    
+    if [ -z "$SYSLINUX_SRC" ]; then
+        echo "ERROR: Could not find isolinux.bin in kernel_tmp"
+        exit 1
+    fi
+    
+    echo "Found Syslinux files at: $SYSLINUX_SRC"
+    cp "$SYSLINUX_SRC/isolinux.bin" "$VARIANT_DIR/staging/boot/isolinux/"
+    cp "$SYSLINUX_SRC/ldlinux.c32" "$VARIANT_DIR/staging/boot/isolinux/"
+    # Try to copy optional but helpful modules
+    cp "$SYSLINUX_SRC/libutil.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
+    cp "$SYSLINUX_SRC/libcom32.c32" "$VARIANT_DIR/staging/boot/isolinux/" 2>/dev/null || true
 
     cat <<EOF > "$VARIANT_DIR/staging/boot/isolinux/isolinux.cfg"
 DEFAULT crispy
@@ -114,7 +120,7 @@ LABEL crispy
   APPEND initrd=/boot/initrd quiet nomodeset panic=1
 EOF
 
-    # 7. Final ISO Creation with Hybrid support
+    # 7. Final ISO Creation
     xorriso -as mkisofs \
       -o "$ISO_NAME.iso" \
       -b boot/isolinux/isolinux.bin \
@@ -123,8 +129,10 @@ EOF
       -R -J -V "CRISPY_OS" \
       "$VARIANT_DIR/staging/"
 
-    # Make the ISO hybrid so it acts like a disk/CD
-    isohybrid "$ISO_NAME.iso" 2>/dev/null || echo "isohybrid not found, skipping..."
+    # Make the ISO hybrid
+    if command -v isohybrid >/dev/null; then
+        isohybrid "$ISO_NAME.iso"
+    fi
 
     rm -rf "$VARIANT_DIR" rootfs_tmp kernel_tmp
     echo "--- Generated $ISO_NAME.iso ---"
