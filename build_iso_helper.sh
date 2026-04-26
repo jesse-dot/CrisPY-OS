@@ -6,7 +6,7 @@ set -e # Exit on error
 echo "--- Starting CrisPY OS ISO Build Process ---"
 
 # Define the Alpine version and architecture
-ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpine/v3.19/main"
+ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpha/v3.19/main"
 ARCH=$(uname -m)
 
 # 1. Clean up and setup workspace
@@ -16,21 +16,23 @@ mkdir -p rootfs/bin rootfs/etc rootfs/lib rootfs/proc rootfs/sys rootfs/dev root
 
 # 2. Fetch the Alpine Linux base and Python to create a ROOTFS
 echo "Downloading Alpine components for rootfs..."
-mkdir -p /tmp/alpine-root/etc/apk
-cp -r /etc/apk/keys /tmp/alpine-root/etc/apk/
+mkdir -p rootfs/etc/apk/keys
+# Copy keys individually to avoid globbing errors
+cp /etc/apk/keys/*.pub rootfs/etc/apk/keys/ || echo "Warning: Could not copy keys, attempting download anyway..."
 
+# We use --no-scripts to prevent mkinitfs from trying (and failing) to run inside the rootfs
 apk add --initdb \
     --root $(pwd)/rootfs \
     --repository "$ALPINE_REPO" \
     --arch "$ARCH" \
     --allow-untrusted \
+    --no-scripts \
     alpine-base python3
 
 # 3. Copy CrisPY OS code into the rootfs
 cp main.py rootfs/usr/bin/main.py
 
-# 4. Create the INIT script (Crucial step to fix the black screen)
-# This is the first process the Linux kernel runs.
+# 4. Create the INIT script
 cat <<EOF > rootfs/init
 #!/bin/sh
 # Mount essential filesystems
@@ -52,12 +54,22 @@ chmod +x rootfs/init
 # 5. Pack the rootfs into a compressed cpio archive (initramfs)
 echo "Packing rootfs into initramfs..."
 cd rootfs
+# We need to ensure we don't include the 'staging' or 'rootfs' directory themselves
 find . | cpio -o -H newc | gzip > ../staging/boot/initramfs-crispy
 cd ..
 
 # 6. Fetch the Kernel
-# We just need the kernel file now, as we made our own initrd
-apk add --initdb --root /tmp/kernel-fetch --repository "$ALPINE_REPO" --arch "$ARCH" --allow-untrusted linux-virt
+# Again, use --no-scripts because we only need the vmlinuz file, not the automated initramfs build
+echo "Fetching kernel..."
+mkdir -p /tmp/kernel-fetch
+apk add --initdb \
+    --root /tmp/kernel-fetch \
+    --repository "$ALPINE_REPO" \
+    --arch "$ARCH" \
+    --allow-untrusted \
+    --no-scripts \
+    linux-virt
+
 cp /tmp/kernel-fetch/boot/vmlinuz-virt staging/boot/
 
 # 7. Create GRUB configuration
