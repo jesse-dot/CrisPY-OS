@@ -287,12 +287,14 @@ def cmd_install(args):
         # Use Python's sys module to find the exact path to the interpreter
         python_path = sys.executable or "/usr/bin/python3"
         
-        grub_cfg = f"""set timeout=5
-set default=0
-
-menuentry "CrisPY OS" {{
-    linux /boot/{kernel_name} root={part_dev} rw rootwait init={python_path} /os_main.py
-}}
+        # Rewritten without triple quotes so code editors don't break!
+        grub_cfg = (
+            "set timeout=5\n"
+            "set default=0\n\n"
+            'menuentry "CrisPY OS" {\n'
+            f'    linux /boot/{kernel_name} root={part_dev} rw rootwait init={python_path} /os_main.py\n'
+            "}\n"
+        )
 
         with open('/mnt/boot/grub/grub.cfg', 'w') as f:
             f.write(grub_cfg)
