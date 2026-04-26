@@ -121,6 +121,38 @@ def cmd_clear(args):
     """Clears the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
+def cmd_sysinfo(args):
+    """Displays raw kernel hardware data for debugging."""
+    print("=========================================")
+    print("      CrisPY OS SYSTEM DIAGNOSTICS       ")
+    print("=========================================")
+    
+    # Force mount proc and sys just in case
+    subprocess.run(['mount', '-t', 'proc', 'none', '/proc'], stderr=subprocess.DEVNULL)
+    subprocess.run(['mount', '-t', 'sysfs', 'none', '/sys'], stderr=subprocess.DEVNULL)
+    
+    print("[1] Kernel Partition Table (/proc/partitions):")
+    try:
+        with open('/proc/partitions', 'r') as f:
+            print(f.read().strip())
+    except Exception as e:
+        print(f"  -> Error: {e}")
+
+    print("\n[2] System Block Devices (/sys/block):")
+    try:
+        blocks = os.listdir('/sys/block')
+        print(f"  -> {blocks}" if blocks else "  -> <empty folder>")
+    except Exception as e:
+        print(f"  -> Error: {e}")
+        
+    print("\n[3] Device Nodes (/dev matching sd*, vd*, hd*, nvme*):")
+    try:
+        devs = [d for d in os.listdir('/dev') if d.startswith(('sd', 'vd', 'hd', 'nvme'))]
+        print(f"  -> {devs}" if devs else "  -> <no drives found in /dev>")
+    except Exception as e:
+        print(f"  -> Error: {e}")
+    print("=========================================")
+
 def cmd_install(args):
     """Executes a REAL installation to a block device."""
     print("=========================================")
@@ -234,8 +266,8 @@ def cmd_install(args):
 
         # 2. Partition the Drive
         print(f"-> Creating new partition table on {target} (fdisk)...")
-        # Sends commands to fdisk: o (new DOS disklabel), n (new partition), p (primary), 1 (partition 1), enter (default first sector), enter (default last sector), w (write)
-        fdisk_cmds = b"o\nn\np\n1\n\n\nw\n"
+        # Sends commands to fdisk: o (new DOS), n (new), p (primary), 1 (part 1), enter, enter, a (bootable), 1 (part 1), w (write)
+        fdisk_cmds = b"o\nn\np\n1\n\n\na\n1\nw\n"
         subprocess.run(['fdisk', target], input=fdisk_cmds, capture_output=True, check=True)
         time.sleep(2)
         
@@ -270,7 +302,7 @@ def cmd_install(args):
         
         # 6. Install Bootloader
         print("-> Installing GRUB bootloader...")
-        subprocess.run(['grub-install', '--boot-directory=/mnt/boot', target], capture_output=True, check=True)
+        subprocess.run(['grub-install', '--target=i386-pc', '--boot-directory=/mnt/boot', target], capture_output=True, check=True)
         
         # 7. Generate GRUB Configuration
         print("-> Creating GRUB configuration file...")
@@ -287,15 +319,13 @@ def cmd_install(args):
         # Use Python's sys module to find the exact path to the interpreter
         python_path = sys.executable or "/usr/bin/python3"
         
-        # Rewritten without triple quotes so code editors don't break!
-        grub_cfg = (
-            "set timeout=5\n"
-            "set default=0\n\n"
-            'menuentry "CrisPY OS" {\n'
-            f'    linux /boot/{kernel_name} root={part_dev} rw rootwait init={python_path} /os_main.py\n'
-            "}\n"
-        )
+        grub_cfg = f"""set timeout=5
+set default=0
 
+menuentry "CrisPY OS" {{
+    linux /boot/{kernel_name} root={part_dev} rw rootwait init={python_path} /os_main.py
+}}
+"""
         with open('/mnt/boot/grub/grub.cfg', 'w') as f:
             f.write(grub_cfg)
         
@@ -333,6 +363,7 @@ def cmd_help(args):
     print("  rm <file>   - Delete a file")
     print("  clear       - Clear the screen")
     print("  install     - Install OS to a drive")
+    print("  sysinfo     - Run hardware diagnostics")
     print("  help        - Show this help message")
     print("  halt        - Shut down the system")
 
@@ -356,6 +387,7 @@ def main():
         'rm': cmd_rm,
         'clear': cmd_clear,
         'install': cmd_install,
+        'sysinfo': cmd_sysinfo,
         'help': cmd_help
     }
 
