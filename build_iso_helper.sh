@@ -5,6 +5,10 @@ set -e # Exit on error
 
 echo "--- Starting CrisPY OS ISO Build Process ---"
 
+# Define the Alpine version and architecture
+ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpine/v3.19/main"
+ARCH=$(uname -m)
+
 # 1. Clean up and setup workspace
 rm -rf staging
 mkdir -p staging/boot/grub
@@ -20,7 +24,6 @@ else
 fi
 
 # 3. Create GRUB configuration
-# This tells the bootloader where to find the kernel and initramfs
 cat <<EOF > staging/boot/grub/grub.cfg
 set default=0
 set timeout=2
@@ -32,10 +35,19 @@ menuentry "CrisPY OS v0.1" {
 EOF
 
 # 4. Fetch the Alpine Linux kernel and initfs
-# We use the virtual kernel (vmlinuz-virt) as it is lightweight for VMs
-echo "Downloading Alpine boot components..."
-apk add --initdb --root /tmp/alpine-root --repository https://dl-cdn.alpinelinux.org/alpine/v3.19/main alpine-base linux-virt python3
+# We explicitly provide the repository and architecture to avoid 'package not found' errors
+echo "Downloading Alpine boot components for $ARCH..."
+mkdir -p /tmp/alpine-root/etc/apk
+cp -r /etc/apk/keys /tmp/alpine-root/etc/apk/
 
+apk add --initdb \
+    --root /tmp/alpine-root \
+    --repository "$ALPINE_REPO" \
+    --arch "$ARCH" \
+    --allow-untrusted \
+    alpine-base linux-virt python3
+
+# Copy the actual kernel and initramfs to our ISO staging area
 cp /tmp/alpine-root/boot/vmlinuz-virt staging/boot/
 cp /tmp/alpine-root/boot/initramfs-virt staging/boot/
 
