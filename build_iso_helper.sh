@@ -82,7 +82,8 @@ EOF
     cp kernel_tmp/usr/share/syslinux/isolinux.bin "$VARIANT_DIR/staging/boot/isolinux/"
     cp kernel_tmp/usr/share/syslinux/ldlinux.c32 "$VARIANT_DIR/staging/boot/isolinux/"
 
-    cat <<EOF > "$VARIANT_DIR/staging/boot/isolinux/isolinux.cfg
+    # FIXED: Added missing closing quote to the heredoc path
+    cat <<EOF > "$VARIANT_DIR/staging/boot/isolinux/isolinux.cfg"
 DEFAULT crispy
 LABEL crispy
   SAY Booting $ISO_NAME...
