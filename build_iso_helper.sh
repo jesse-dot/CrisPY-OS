@@ -10,8 +10,6 @@ ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpine/v3.19/main"
 ALPINE_COMMUNITY="https://dl-cdn.alpinelinux.org/alpine/v3.19/community"
 ARCH=$(uname -m)
 
-# Function to build an ISO
-# Args: $1=ISO_NAME, $2=SCRIPT_NAME, $3=INCLUDE_TOOLS (true/false)
 build_variant() {
     ISO_NAME=$1
     SCRIPT_NAME=$2
@@ -19,19 +17,18 @@ build_variant() {
     
     echo "--- Building Variant: $ISO_NAME ($SCRIPT_NAME) ---"
     
-    # Setup fresh workspace for this variant
     VARIANT_DIR="work_$ISO_NAME"
     rm -rf "$VARIANT_DIR" rootfs_tmp
     mkdir -p "$VARIANT_DIR/staging/boot/isolinux"
-    mkdir -p rootfs_tmp/bin rootfs_tmp/etc rootfs_tmp/lib rootfs_tmp/proc rootfs_tmp/sys rootfs_tmp/dev rootfs_tmp/tmp rootfs_tmp/usr/bin rootfs_tmp/usr/sbin rootfs_tmp/sbin
+    mkdir -p rootfs_tmp/bin rootfs_tmp/etc rootfs_tmp/lib rootfs_tmp/proc rootfs_tmp/sys rootfs_tmp/dev rootfs_tmp/tmp rootfs_tmp/usr/bin rootfs_tmp/usr/sbin rootfs_tmp/sbin rootfs_tmp/root
 
     # 1. Prepare RootFS
-    echo "Creating RootFS..."
+    echo "Creating RootFS and installing packages..."
     mkdir -p rootfs_tmp/etc/apk/keys
     cp /etc/apk/keys/*.pub rootfs_tmp/etc/apk/keys/ || true
 
-    # Define packages based on variant
-    PACKAGES="alpine-base python3 busybox linux-virt"
+    # Core packages including kmod for modprobe
+    PACKAGES="alpine-base python3 busybox kmod linux-virt"
     if [ "$INCLUDE_TOOLS" = "true" ]; then
         PACKAGES="$PACKAGES util-linux e2fsprogs grub-bios"
     fi
@@ -45,25 +42,32 @@ build_variant() {
         --no-scripts \
         $PACKAGES
 
-    # 2. Copy and CLEAN the specific Python script
+    # 2. Extract Kernel Modules to RootFS (Crucial for drive detection)
+    echo "Extracting kernel modules into RootFS..."
+    # We use the modules from the linux-virt package already in the rootfs
+    # but we need to make sure depmod is run for the correct kernel version
+    KVER=$(ls rootfs_tmp/lib/modules | head -n 1)
+    echo "Detected kernel version: $KVER"
+    # Ensure modprobe works inside the live environment
+    chroot rootfs_tmp /sbin/depmod -a "$KVER" || true
+
+    # 3. Copy and CLEAN the specific Python script
     if [ -f "$SCRIPT_NAME" ]; then
         echo "Cleaning and copying $SCRIPT_NAME..."
         sed 's/\xc2\xa0/ /g' "$SCRIPT_NAME" > rootfs_tmp/usr/bin/kernel.py
     else
         echo "Warning: $SCRIPT_NAME not found, falling back to main.py"
-        if [ -f "main.py" ]; then
-            sed 's/\xc2\xa0/ /g' main.py > rootfs_tmp/usr/bin/kernel.py
-        else
-            echo "ERROR: Neither $SCRIPT_NAME nor main.py found!"
-            exit 1
-        fi
+        sed 's/\xc2\xa0/ /g' main.py > rootfs_tmp/usr/bin/kernel.py
     fi
 
-    # 3. Create the INIT script
+    # 4. Create the INIT script
     cat <<EOF > rootfs_tmp/init
 #!/bin/sh
 
-# Ensure busybox applets are available
+# Establish PATH immediately
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+# Ensure busybox links exist
 /bin/busybox --install -s
 
 # Mount essential filesystems
@@ -72,49 +76,42 @@ mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
 # Load Storage Drivers
-# VirtIO (vda)
-modprobe virtio virtio_pci virtio_blk virtio_net 2>/dev/null || true
-# NVMe (nvme0n1)
+echo "Loading storage drivers..."
+modprobe virtio virtio_pci virtio_blk 2>/dev/null || true
 modprobe nvme 2>/dev/null || true
-# SCSI/SATA (sda)
-modprobe sd_mod mptsas mptspi piix ahci 2>/dev/null || true
+modprobe sd_mod ahci 2>/dev/null || true
 
-# Setup basic terminal environment
+# Setup environment
 export TERM=linux
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export HOME=/root
-mkdir -p /root
 cd /root
 
 echo "---------------------------------------"
 echo "  Booting $ISO_NAME                   "
-echo "  (Storage Support: VirtIO/SCSI/NVMe)  "
 echo "---------------------------------------"
 
-# Give the kernel and devtmpfs a second to settle and discover drives
+# Give the kernel time to scan PCI/Storage
 sleep 2
 
 # Execute Python kernel
 if [ -f /usr/bin/python3 ]; then
     /usr/bin/python3 /usr/bin/kernel.py
 else
-    echo "CRITICAL ERROR: Python3 not found in /usr/bin/"
+    echo "CRITICAL ERROR: Python3 not found!"
     /bin/sh
 fi
 
-# If the script exits
-echo "CrisPY OS has shut down. Halting..."
 poweroff -f
 EOF
     chmod +x rootfs_tmp/init
 
-    # 4. Pack Initramfs
+    # 5. Pack Initramfs
     echo "Packing Initramfs..."
     cd rootfs_tmp
     find . | cpio -o -H newc | gzip > "../$VARIANT_DIR/staging/boot/initrd"
     cd ..
 
-    # 5. Setup Bootloader and Kernel
+    # 6. Setup Bootloader and Kernel
     mkdir -p kernel_tmp
     apk add --initdb --root $(pwd)/kernel_tmp --repository "$ALPINE_REPO" --arch "$ARCH" --allow-untrusted --no-scripts linux-virt syslinux
     
@@ -130,7 +127,7 @@ LABEL crispy
   APPEND initrd=/boot/initrd quiet panic=1
 EOF
 
-    # 6. Final ISO Creation
+    # 7. Final ISO Creation
     xorriso -as mkisofs \
       -o "$ISO_NAME.iso" \
       -b boot/isolinux/isolinux.bin \
@@ -139,12 +136,10 @@ EOF
       -R -J -V "${ISO_NAME}" \
       "$VARIANT_DIR/staging/"
 
-    # Cleanup variant
     rm -rf "$VARIANT_DIR" rootfs_tmp kernel_tmp
     echo "--- Finished $ISO_NAME.iso ---"
 }
 
-# Run builds
 build_variant "crispy-live" "main.py" "false"
 build_variant "crispy-installer" "main_installable.py" "true"
 
