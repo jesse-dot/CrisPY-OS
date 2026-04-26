@@ -1,0 +1,53 @@
+name: Build CrisPY OS ISO
+on: 
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+      options: --privileged
+
+    steps:
+      - name: Install Build Dependencies
+        run: |
+          apk add --no-cache \
+            alpine-sdk \
+            syslinux \
+            xorriso \
+            mtools \
+            dosfstools \
+            grub-efi \
+            python3
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Prepare Filesystem
+        run: |
+          mkdir -p iso_root/etc
+          mkdir -p iso_root/usr/bin/crispy
+          
+          # Copy your OS code
+          cp main.py iso_root/usr/bin/crispy/
+          
+          # Force the login shell to be our Python script
+          cat <<EOF > iso_root/etc/profile
+          echo "Booting CrisPY OS..."
+          python3 /usr/bin/crispy/main.py
+          poweroff
+          EOF
+
+      - name: Generate ISO
+        run: |
+          chmod +x ./build_iso_helper.sh
+          ./build_iso_helper.sh
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: crispy-os-iso
+          path: pyos.iso
