@@ -10,48 +10,68 @@ ALPINE_REPO="https://dl-cdn.alpinelinux.org/alpine/v3.19/main"
 ARCH=$(uname -m)
 
 # 1. Clean up and setup workspace
-rm -rf staging
+rm -rf staging rootfs
 mkdir -p staging/boot/grub
-mkdir -p staging/pyos
+mkdir -p rootfs/bin rootfs/etc rootfs/lib rootfs/proc rootfs/sys rootfs/dev rootfs/tmp rootfs/usr/bin
 
-# 2. Copy the Python Kernel (main.py)
-if [ -f "main.py" ]; then
-    cp main.py staging/pyos/
-    echo "Successfully copied main.py to staging."
-else
-    echo "ERROR: main.py not found in current directory!"
-    exit 1
-fi
-
-# 3. Create GRUB configuration
-cat <<EOF > staging/boot/grub/grub.cfg
-set default=0
-set timeout=2
-
-menuentry "CrisPY OS v0.1" {
-    linux /boot/vmlinuz-virt quiet console=tty0
-    initrd /boot/initramfs-virt
-}
-EOF
-
-# 4. Fetch the Alpine Linux kernel and initfs
-# We explicitly provide the repository and architecture to avoid 'package not found' errors
-echo "Downloading Alpine boot components for $ARCH..."
+# 2. Fetch the Alpine Linux base and Python to create a ROOTFS
+echo "Downloading Alpine components for rootfs..."
 mkdir -p /tmp/alpine-root/etc/apk
 cp -r /etc/apk/keys /tmp/alpine-root/etc/apk/
 
 apk add --initdb \
-    --root /tmp/alpine-root \
+    --root $(pwd)/rootfs \
     --repository "$ALPINE_REPO" \
     --arch "$ARCH" \
     --allow-untrusted \
-    alpine-base linux-virt python3
+    alpine-base python3
 
-# Copy the actual kernel and initramfs to our ISO staging area
-cp /tmp/alpine-root/boot/vmlinuz-virt staging/boot/
-cp /tmp/alpine-root/boot/initramfs-virt staging/boot/
+# 3. Copy CrisPY OS code into the rootfs
+cp main.py rootfs/usr/bin/main.py
 
-# 5. Build the ISO
+# 4. Create the INIT script (Crucial step to fix the black screen)
+# This is the first process the Linux kernel runs.
+cat <<EOF > rootfs/init
+#!/bin/sh
+# Mount essential filesystems
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+echo "Welcome to CrisPY OS Bootloader..."
+# Run the Python OS
+python3 /usr/bin/main.py
+
+# If the OS exits, poweroff
+echo "CrisPY OS has exited. Shutting down..."
+poweroff -f
+EOF
+
+chmod +x rootfs/init
+
+# 5. Pack the rootfs into a compressed cpio archive (initramfs)
+echo "Packing rootfs into initramfs..."
+cd rootfs
+find . | cpio -o -H newc | gzip > ../staging/boot/initramfs-crispy
+cd ..
+
+# 6. Fetch the Kernel
+# We just need the kernel file now, as we made our own initrd
+apk add --initdb --root /tmp/kernel-fetch --repository "$ALPINE_REPO" --arch "$ARCH" --allow-untrusted linux-virt
+cp /tmp/kernel-fetch/boot/vmlinuz-virt staging/boot/
+
+# 7. Create GRUB configuration
+cat <<EOF > staging/boot/grub/grub.cfg
+set default=0
+set timeout=1
+
+menuentry "CrisPY OS v0.1" {
+    linux /boot/vmlinuz-virt quiet panic=1
+    initrd /boot/initramfs-crispy
+}
+EOF
+
+# 8. Build the ISO
 echo "Creating ISO image..."
 xorriso -as mkisofs \
   -joliet -rock \
