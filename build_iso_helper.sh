@@ -22,7 +22,7 @@ build_variant() {
     VARIANT_DIR="work_$ISO_NAME"
     rm -rf "$VARIANT_DIR" rootfs_tmp
     mkdir -p "$VARIANT_DIR/staging/boot/isolinux"
-    mkdir -p rootfs_tmp/bin rootfs_tmp/etc rootfs_tmp/lib rootfs_tmp/proc rootfs_tmp/sys rootfs_tmp/dev rootfs_tmp/tmp rootfs_tmp/usr/bin
+    mkdir -p rootfs_tmp/bin rootfs_tmp/etc rootfs_tmp/lib rootfs_tmp/proc rootfs_tmp/sys rootfs_tmp/dev rootfs_tmp/tmp rootfs_tmp/usr/bin rootfs_tmp/usr/sbin rootfs_tmp/sbin
 
     # 1. Prepare RootFS
     echo "Creating RootFS..."
@@ -45,7 +45,6 @@ build_variant() {
         $PACKAGES
 
     # 2. Copy and CLEAN the specific Python script
-    # This removes hidden non-breaking spaces (\xa0) that cause SyntaxErrors
     if [ -f "$SCRIPT_NAME" ]; then
         echo "Cleaning and copying $SCRIPT_NAME..."
         sed 's/\xc2\xa0/ /g' "$SCRIPT_NAME" > rootfs_tmp/usr/bin/kernel.py
@@ -60,16 +59,21 @@ build_variant() {
     fi
 
     # 3. Create the INIT script
-    # We ensure we have a functional shell and mount system paths
+    # Fixed the shebang path to #!/bin/sh (which points to busybox)
     cat <<EOF > rootfs_tmp/init
-#!/bin/bin/busybox sh
+#!/bin/sh
+
+# Ensure busybox applets are available
 /bin/busybox --install -s
+
+# Mount essential filesystems
 mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
 # Setup basic terminal environment
 export TERM=linux
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export HOME=/root
 mkdir -p /root
 cd /root
@@ -78,11 +82,19 @@ echo "---------------------------------------"
 echo "  Booting $ISO_NAME                   "
 echo "---------------------------------------"
 
-# Explicitly call python3 to execute our kernel
-python3 /usr/bin/kernel.py
+# Give the kernel a second to settle
+sleep 1
 
-# If the script crashes or exits
-echo "System Halted. Powering off..."
+# Execute Python kernel
+if [ -f /usr/bin/python3 ]; then
+    /usr/bin/python3 /usr/bin/kernel.py
+else
+    echo "CRITICAL ERROR: Python3 not found in /usr/bin/"
+    /bin/sh
+fi
+
+# If the script exits
+echo "CrisPY OS has shut down. Halting..."
 poweroff -f
 EOF
     chmod +x rootfs_tmp/init
