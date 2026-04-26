@@ -227,12 +227,24 @@ def cmd_install(args):
     part_dev = f"{target}1" if not target[-1].isdigit() else f"{target}p1"
     
     try:
+        # 1.5 Wipe old filesystems/signatures so fdisk doesn't get stuck asking "Remove signature?"
+        print(f"-> Wiping old partition tables on {target}...")
+        subprocess.run(['dd', 'if=/dev/zero', f'of={target}', 'bs=1M', 'count=10'], stderr=subprocess.DEVNULL)
+        time.sleep(1)
+
         # 2. Partition the Drive
         print(f"-> Creating new partition table on {target} (fdisk)...")
         # Sends commands to fdisk: o (new DOS disklabel), n (new partition), p (primary), 1 (partition 1), enter (default first sector), enter (default last sector), w (write)
         fdisk_cmds = b"o\nn\np\n1\n\n\nw\n"
         subprocess.run(['fdisk', target], input=fdisk_cmds, capture_output=True, check=True)
-        time.sleep(1)
+        time.sleep(2)
+        
+        # Force the Linux device manager to refresh /dev with the newly created partition node
+        subprocess.run(['mdev', '-s'], stderr=subprocess.DEVNULL)
+        
+        # Double check that the partition actually showed up before trying to format
+        if not os.path.exists(part_dev):
+            raise Exception(f"The partition {part_dev} was not created. fdisk may have failed silently.")
         
         # 3. Format the Partition
         print(f"-> Formatting {part_dev} as ext4...")
