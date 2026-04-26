@@ -2,7 +2,7 @@
 # This script bundles the Alpine kernel and CrisPY OS into two bootable ISOs:
 # 1. A Live-only version (main.py)
 # 2. An Installable version (main_installable.py + system tools)
-# Includes VirtIO support for modern virtualization environments.
+# Includes VirtIO, SCSI, and NVMe support for broad virtualization/hardware compatibility.
 
 set -e # Exit on error
 
@@ -31,7 +31,6 @@ build_variant() {
     cp /etc/apk/keys/*.pub rootfs_tmp/etc/apk/keys/ || true
 
     # Define packages based on variant
-    # Added linux-virt to rootfs packages to ensure drivers/modules are available
     PACKAGES="alpine-base python3 busybox linux-virt"
     if [ "$INCLUDE_TOOLS" = "true" ]; then
         PACKAGES="$PACKAGES util-linux e2fsprogs grub-bios"
@@ -72,9 +71,13 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 
-# Load VirtIO modules if they exist
-# This ensures /dev/vda, /dev/vdb, etc. appear in virtual environments
+# Load Storage Drivers
+# VirtIO (vda)
 modprobe virtio virtio_pci virtio_blk virtio_net 2>/dev/null || true
+# NVMe (nvme0n1)
+modprobe nvme 2>/dev/null || true
+# SCSI/SATA (sda)
+modprobe sd_mod mptsas mptspi piix ahci 2>/dev/null || true
 
 # Setup basic terminal environment
 export TERM=linux
@@ -85,11 +88,11 @@ cd /root
 
 echo "---------------------------------------"
 echo "  Booting $ISO_NAME                   "
-echo "  (VirtIO Support Enabled)             "
+echo "  (Storage Support: VirtIO/SCSI/NVMe)  "
 echo "---------------------------------------"
 
-# Give the kernel and devtmpfs a second to settle
-sleep 1
+# Give the kernel and devtmpfs a second to settle and discover drives
+sleep 2
 
 # Execute Python kernel
 if [ -f /usr/bin/python3 ]; then
