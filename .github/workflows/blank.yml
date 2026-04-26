@@ -43,6 +43,7 @@ jobs:
 
       - name: Generate ISO
         run: |
+          # Ensure the helper script is executable
           chmod +x ./build_iso_helper.sh
           ./build_iso_helper.sh
 
