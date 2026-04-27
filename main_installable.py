@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import shutil
 import subprocess
@@ -331,9 +330,11 @@ def cmd_install(args):
                     kernel_name = f
                     break
         
-        # Use Python's sys module to find the exact path to the interpreter
-        python_path = sys.executable or "/usr/bin/python3"
-        lite_script_path = "/usr/bin/main.py"
+        init_path = "/sbin/init"
+        os.makedirs('/mnt/sbin', exist_ok=True)
+        with open('/mnt/sbin/init', 'w') as f:
+            f.write("#!/bin/sh\nexec /usr/bin/python3 /usr/bin/main.py\n")
+        os.chmod('/mnt/sbin/init', 0o755)
 
         part_uuid = ""
         try:
@@ -345,7 +346,7 @@ def cmd_install(args):
         menu_lines = []
         if part_uuid:
             menu_lines.append(f"    search --no-floppy --fs-uuid --set=root {part_uuid}")
-        menu_lines.append(f"    linux /boot/{kernel_name} root={root_arg} rw rootwait rootfstype=ext4 init={python_path} {lite_script_path}")
+        menu_lines.append(f"    linux /boot/{kernel_name} root={root_arg} rw rootwait rootfstype=ext4 init={init_path}")
         menu_body = "\n".join(menu_lines)
 
         grub_cfg = f"""set timeout=5
