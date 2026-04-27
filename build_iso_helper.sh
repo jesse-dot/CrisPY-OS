@@ -25,7 +25,7 @@ build_variant() {
     mkdir -p rootfs_tmp/etc/apk/keys
     cp /etc/apk/keys/*.pub rootfs_tmp/etc/apk/keys/ || true
 
-    PACKAGES="alpine-base python3 busybox kmod linux-virt"
+    PACKAGES="alpine-base python3 busybox kmod linux-virt nano"
     if [ "$INCLUDE_TOOLS" = "true" ]; then
         PACKAGES="$PACKAGES util-linux e2fsprogs grub-bios"
     fi
@@ -44,7 +44,14 @@ build_variant() {
     echo "Detected kernel version: $KVER"
     chroot rootfs_tmp /sbin/depmod -a "$KVER" || true
 
-    # 3. Copy and CLEAN the specific Python script
+    # 3. Copy and CLEAN the Python scripts
+    if [ -f "main.py" ]; then
+        sed 's/\xc2\xa0/ /g' main.py > rootfs_tmp/usr/bin/main.py
+    fi
+    if [ -f "main_installable.py" ]; then
+        sed 's/\xc2\xa0/ /g' main_installable.py > rootfs_tmp/usr/bin/main_installable.py
+    fi
+
     if [ -f "$SCRIPT_NAME" ]; then
         echo "Cleaning and copying $SCRIPT_NAME..."
         sed 's/\xc2\xa0/ /g' "$SCRIPT_NAME" > rootfs_tmp/usr/bin/kernel.py

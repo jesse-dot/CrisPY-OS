@@ -1,5 +1,7 @@
 import os
 import sys
+import shutil
+import subprocess
 
 # --- System Commands ---
 
@@ -118,6 +120,21 @@ def cmd_clear(args):
     """Clears the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
+def cmd_nano(args):
+    """Opens a file in nano."""
+    if not args:
+        print("nano: missing filename")
+        return
+
+    if shutil.which('nano') is None:
+        print("nano: command not found")
+        return
+
+    try:
+        subprocess.run(['nano', args[0]])
+    except Exception as e:
+        print(f"nano: {args[0]}: {e}")
+
 def cmd_help(args):
     """Displays system help."""
     print("CrisPY OS Prototype v0.2")
@@ -130,6 +147,7 @@ def cmd_help(args):
     print("  touch <file>- Create an empty file")
     print("  mkdir <dir> - Create a new directory")
     print("  rm <file>   - Delete a file")
+    print("  nano <file> - Edit a file with nano")
     print("  clear       - Clear the screen")
     print("  help        - Show this help message")
     print("  halt        - Shut down the system")
@@ -152,6 +170,7 @@ def main():
         'touch': cmd_touch,
         'mkdir': cmd_mkdir,
         'rm': cmd_rm,
+        'nano': cmd_nano,
         'clear': cmd_clear,
         'help': cmd_help
     }
