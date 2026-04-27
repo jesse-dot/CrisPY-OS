@@ -333,7 +333,7 @@ def cmd_install(args):
         
         # Use Python's sys module to find the exact path to the interpreter
         python_path = sys.executable or "/usr/bin/python3"
-        lite_script_path = "/usr/bin/main.py" if os.path.exists('/mnt/usr/bin/main.py') else "/usr/bin/kernel.py"
+        lite_script_path = "/usr/bin/main.py"
 
         part_uuid = ""
         try:
@@ -342,13 +342,17 @@ def cmd_install(args):
             part_uuid = ""
 
         root_arg = f"UUID={part_uuid}" if part_uuid else part_dev
-        search_line = f"    search --no-floppy --fs-uuid --set=root {part_uuid}\n" if part_uuid else ""
+        menu_lines = []
+        if part_uuid:
+            menu_lines.append(f"    search --no-floppy --fs-uuid --set=root {part_uuid}")
+        menu_lines.append(f"    linux /boot/{kernel_name} root={root_arg} rw rootwait rootfstype=ext4 init={python_path} {lite_script_path}")
+        menu_body = "\n".join(menu_lines)
 
         grub_cfg = f"""set timeout=5
 set default=0
 
 menuentry "CrisPY OS" {{
-{search_line}    linux /boot/{kernel_name} root={root_arg} rw rootwait rootfstype=ext4 init={python_path} {lite_script_path}
+{menu_body}
 }}
 """
         with open('/mnt/boot/grub/grub.cfg', 'w') as f:
