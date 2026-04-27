@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import shutil
 import subprocess
@@ -120,6 +119,21 @@ def cmd_rm(args):
 def cmd_clear(args):
     """Clears the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
+
+def cmd_nano(args):
+    """Opens a file in nano."""
+    if not args:
+        print("nano: missing filename")
+        return
+
+    if shutil.which('nano') is None:
+        print("nano: command not found")
+        return
+
+    try:
+        subprocess.run(['nano', args[0]])
+    except Exception as e:
+        print(f"nano: {args[0]}: {e}")
 
 def cmd_sysinfo(args):
     """Displays raw kernel hardware data for debugging."""
@@ -316,14 +330,30 @@ def cmd_install(args):
                     kernel_name = f
                     break
         
-        # Use Python's sys module to find the exact path to the interpreter
-        python_path = sys.executable or "/usr/bin/python3"
-        
+        init_path = "/sbin/init"
+        os.makedirs('/mnt/sbin', exist_ok=True)
+        with open('/mnt/sbin/init', 'w') as f:
+            f.write("#!/bin/sh\nexec /usr/bin/python3 /usr/bin/main.py\n")
+        os.chmod('/mnt/sbin/init', 0o755)
+
+        part_uuid = ""
+        try:
+            part_uuid = subprocess.check_output(['blkid', '-s', 'UUID', '-o', 'value', part_dev], text=True).strip()
+        except Exception:
+            part_uuid = ""
+
+        root_arg = f"UUID={part_uuid}" if part_uuid else part_dev
+        menu_lines = []
+        if part_uuid:
+            menu_lines.append(f"    search --no-floppy --fs-uuid --set=root {part_uuid}")
+        menu_lines.append(f"    linux /boot/{kernel_name} root={root_arg} rw rootwait rootfstype=ext4 init={init_path}")
+        menu_body = "\n".join(menu_lines)
+
         grub_cfg = f"""set timeout=5
 set default=0
 
 menuentry "CrisPY OS" {{
-    linux /boot/{kernel_name} root={part_dev} rw rootwait init={python_path} /os_main.py
+{menu_body}
 }}
 """
         with open('/mnt/boot/grub/grub.cfg', 'w') as f:
@@ -361,6 +391,7 @@ def cmd_help(args):
     print("  touch <file>- Create an empty file")
     print("  mkdir <dir> - Create a new directory")
     print("  rm <file>   - Delete a file")
+    print("  nano <file> - Edit a file with nano")
     print("  clear       - Clear the screen")
     print("  install     - Install OS to a drive")
     print("  sysinfo     - Run hardware diagnostics")
@@ -385,6 +416,7 @@ def main():
         'touch': cmd_touch,
         'mkdir': cmd_mkdir,
         'rm': cmd_rm,
+        'nano': cmd_nano,
         'clear': cmd_clear,
         'install': cmd_install,
         'sysinfo': cmd_sysinfo,
